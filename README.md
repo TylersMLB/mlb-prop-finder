@@ -1,22 +1,21 @@
-# Diamond Edge MLB v6
+# Diamond Edge Pro v7
 
-Version 6 fixes the missing-player-props problem by using The Odds API's event-level odds endpoint.
+A polished free MLB betting research dashboard built on the existing Version 6 odds and player-prop integration.
 
-## New features
-- Loads MLB player props one game at a time
-- Supports pitcher strikeouts, outs, hits allowed, walks, earned runs, and win props
-- Supports batter total bases, hits, home runs, RBIs, runs, H+R+RBI, walks, strikeouts, singles, doubles, triples, and stolen bases
-- Shows every sportsbook price
-- Shows the best price for each exact player, side, and line
-- Ranks line-shopping value using a no-vig sportsbook consensus
-- Displays estimated API-credit usage before loading
-- Provides CSV downloads
+## Improvements
+- New Command Center
+- Better Best Bets workflow
+- Matchup research pages
+- Team strength research
+- Cleaner player-prop filters
+- Better error and connection messages
+- Bankroll-aware unit sizing
+- CSV import/export for bet tracking
+- ROI, win rate, and market-level analytics
+- Data status page explaining free versus premium limitations
 
-## Important
-The Odds API charges event-level requests by markets × regions. Start with 3–5 games and your favorite markets to conserve credits.
-
-## Upload
-Replace all six files:
+## Upload to GitHub
+Replace these six files:
 - app.py
 - constants.py
 - data_sources.py
@@ -26,5 +25,5 @@ Replace all six files:
 
 ## Streamlit secret
 ```toml
-ODDS_API_KEY = "your_key_here"
+ODDS_API_KEY = "your_actual_key"
 ```
