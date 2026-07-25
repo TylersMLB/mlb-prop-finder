@@ -19,6 +19,7 @@ from model import (
     decimal_odds,
     prop_best_prices,
     prop_value_board,
+    best_prop_shortlist,
     value_board,
 )
 
@@ -255,13 +256,13 @@ elif page == "🔥 Best Bets":
         if props.empty:
             st.info("Load player props from the Player Props page first.")
         else:
-            prop_board = prop_value_board(props)
-            min_prop_edge = st.slider("Minimum consensus edge", -3.0, 10.0, 0.0, .5)
-            render_cards(prop_board[prop_board.Edge >= min_prop_edge], 24, prop=True)
-            st.caption("Prop rankings compare the best available price with a no-vig sportsbook consensus. They are not yet trained player-performance projections.")
+            shortlist = best_prop_shortlist(props, minimum_books=2, minimum_edge=0.5, one_per_player=True, limit=15)
+            st.subheader("Best player props")
+            render_cards(shortlist, 15, prop=True)
+            st.caption("Only the strongest available price for each player is shown. Rankings use no-vig sportsbook consensus and line shopping, not a guaranteed performance projection.")
 
 elif page == "🎯 Player Props":
-    page_header("Player Props", "Load available markets, compare every sportsbook, and isolate the best price.")
+    page_header("Best Player Props", "A short ranked list of the strongest available props—not a wall of sportsbook prices.")
     game_options = sorted(odds.Game.dropna().unique().tolist()) if not odds.empty else []
     selected_games = st.multiselect("Games", game_options, default=game_options[: min(4, len(game_options))])
     market_names = list(MLB_PROP_MARKETS.keys())
@@ -269,28 +270,59 @@ elif page == "🎯 Player Props":
     selected_markets = st.multiselect("Markets", market_names, default=defaults)
     estimated_calls = len(selected_games or game_options)
     st.caption(f"Estimated request load: {estimated_calls} game requests across {len(selected_markets)} selected markets.")
-    if st.button("Load selected player props", type="primary", use_container_width=True):
+    if st.button("Find today's best player props", type="primary", use_container_width=True):
         load_props(selected_games, selected_markets)
     if st.session_state.prop_status:
         st.info(st.session_state.prop_status)
 
     props = st.session_state.props
     if not props.empty:
+        c1, c2, c3 = st.columns(3)
+        minimum_edge = c1.slider("Minimum edge", 0.0, 8.0, 0.5, 0.5)
+        minimum_books = c2.slider("Minimum sportsbooks", 1, 6, 2)
+        top_n = c3.slider("Number of picks", 3, 20, 10)
+
+        shortlist = best_prop_shortlist(
+            props,
+            minimum_books=minimum_books,
+            minimum_edge=minimum_edge,
+            one_per_player=True,
+            limit=top_n,
+        )
+
         a, b, c, d = st.columns(4)
-        a.metric("Prices", len(props)); b.metric("Players", props.Player.nunique()); c.metric("Books", props.Book.nunique()); d.metric("Markets", props.Market.nunique())
-        f1, f2, f3 = st.columns([2, 2, 1])
-        market_choice = f1.selectbox("Market filter", ["All"] + sorted(props.Market.map(lambda x: MARKET_LABELS.get(x, x)).unique().tolist()))
-        player_search = f2.text_input("Search player")
-        best_only = f3.checkbox("Best prices only", value=True)
-        display = props.copy()
-        display["Market Name"] = display.Market.map(lambda x: MARKET_LABELS.get(x, x))
-        if market_choice != "All": display = display[display["Market Name"] == market_choice]
-        if player_search: display = display[display.Player.str.contains(player_search, case=False, na=False)]
-        if best_only:
-            display = prop_best_prices(display)
+        a.metric("Best props", len(shortlist))
+        b.metric("Players checked", props.Player.nunique())
+        c.metric("Sportsbooks", props.Book.nunique())
+        d.metric("Markets checked", props.Market.nunique())
+
+        if shortlist.empty:
+            st.warning("No props meet those quality filters. Lower Minimum edge or Minimum sportsbooks, or load more games and markets.")
+        else:
+            st.subheader("Today's strongest props")
+            render_cards(shortlist, top_n, prop=True)
+            table = shortlist.copy()
+            table["Prop"] = table.apply(lambda r: f"{r.Player} {r.Side} {r.Line:g}", axis=1)
+            table["Market Name"] = table.Market.map(lambda x: MARKET_LABELS.get(x, x))
+            table["Consensus %"] = (table.ConsensusProb * 100).round(1)
+            table["Edge %"] = table.Edge.round(1)
+            st.dataframe(
+                table[["Prop", "Market Name", "Game", "Odds", "Book", "Consensus %", "Edge %", "BookCount"]],
+                use_container_width=True,
+                hide_index=True,
+            )
+            st.download_button("Download best props", table.to_csv(index=False), "diamond_edge_best_props.csv", "text/csv")
+
+        with st.expander("See all sportsbook prop prices"):
+            display = props.copy()
             display["Market Name"] = display.Market.map(lambda x: MARKET_LABELS.get(x, x))
-        st.dataframe(display[["Game", "Market Name", "Player", "Side", "Line", "Odds", "Book", "LastUpdate"]], use_container_width=True, hide_index=True)
-        st.download_button("Download prop prices", display.to_csv(index=False), "diamond_edge_props.csv", "text/csv")
+            st.dataframe(
+                display[["Game", "Market Name", "Player", "Side", "Line", "Odds", "Book", "LastUpdate"]],
+                use_container_width=True,
+                hide_index=True,
+            )
+
+        st.caption("These are the best line-shopping opportunities found from the connected books. A future trained player model would add independent statistical projections.")
 
 elif page == "⚾ Matchups":
     page_header("Matchups", "Starting pitchers, fair odds, projected total, park factor, weather, and live prices.")

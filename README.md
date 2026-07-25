@@ -1,21 +1,18 @@
-# Diamond Edge Pro v7
+# Diamond Edge Pro v8
 
-A polished free MLB betting research dashboard built on the existing Version 6 odds and player-prop integration.
+Version 8 changes Player Props from a raw price board into a ranked shortlist.
 
-## Improvements
-- New Command Center
-- Better Best Bets workflow
-- Matchup research pages
-- Team strength research
-- Cleaner player-prop filters
-- Better error and connection messages
-- Bankroll-aware unit sizing
-- CSV import/export for bet tracking
-- ROI, win rate, and market-level analytics
-- Data status page explaining free versus premium limitations
+## Main improvement
+- Shows only the strongest player props by default
+- Keeps one best prop per player
+- Requires configurable sportsbook coverage
+- Filters by minimum edge
+- Ranks by no-vig consensus, expected value, price quality, and book coverage
+- Keeps all raw prices hidden in an optional expander
+- Downloads only the best-props shortlist
 
-## Upload to GitHub
-Replace these six files:
+## Upload
+Replace all six files in GitHub:
 - app.py
 - constants.py
 - data_sources.py
@@ -23,7 +20,7 @@ Replace these six files:
 - requirements.txt
 - README.md
 
-## Streamlit secret
-```toml
-ODDS_API_KEY = "your_actual_key"
-```
+Keep your existing `ODDS_API_KEY` in Streamlit Secrets.
+
+## Important
+The free version ranks line-shopping value using sportsbook consensus. It does not yet contain a separately trained player-performance projection model.

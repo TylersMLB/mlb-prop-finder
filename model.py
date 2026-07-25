@@ -190,3 +190,40 @@ def prop_value_board(props):
     if not rows:
         return pd.DataFrame()
     return pd.DataFrame(rows).sort_values(["Edge","EV"], ascending=False)
+
+
+
+def best_prop_shortlist(props, minimum_books=2, minimum_edge=0.5, one_per_player=True, limit=15):
+    """Return a concise list of the strongest line-shopping prop opportunities."""
+    board = prop_value_board(props)
+    if board.empty:
+        return board
+
+    coverage = (
+        props.groupby(["Game", "Market", "Player", "Line"], dropna=False)["Book"]
+        .nunique()
+        .rename("BookCount")
+        .reset_index()
+    )
+    board = board.merge(coverage, on=["Game", "Market", "Player", "Line"], how="left")
+    board["BookCount"] = board["BookCount"].fillna(0).astype(int)
+    board = board[(board.BookCount >= minimum_books) & (board.Edge >= minimum_edge)].copy()
+    if board.empty:
+        return board
+
+    board["RankScore"] = (
+        board.Edge * 7.0
+        + board.EV.clip(lower=-10, upper=25) * 0.8
+        + board.BookCount.clip(upper=8) * 1.5
+        + board.ConsensusProb * 10
+    )
+    board = board.sort_values(["RankScore", "Edge", "EV"], ascending=False)
+    if one_per_player:
+        board = board.drop_duplicates(subset=["Player"], keep="first")
+    board["Reason"] = board.apply(
+        lambda r: (
+            f"Best price {int(r.Odds):+d} at {r.Book}; "
+            f"{r.Edge:.1f}% above break-even with prices from {int(r.BookCount)} books."
+        ), axis=1
+    )
+    return board.head(limit).reset_index(drop=True)
