@@ -128,3 +128,65 @@ def value_board(models, odds):
                 "Reason": f"Model {prob*100:.1f}% vs market break-even {implied_probability(best.Odds)*100:.1f}%.",
             })
     return pd.DataFrame(rows).sort_values(["Edge", "EV"], ascending=False)
+
+
+def no_vig_probability(over_odds, under_odds, side):
+    over_raw = implied_probability(over_odds)
+    under_raw = implied_probability(under_odds)
+    total = over_raw + under_raw
+    if total <= 0:
+        return None
+    return over_raw / total if side == "Over" else under_raw / total
+
+def prop_best_prices(props):
+    """Best sportsbook price for each exact player/market/side/line."""
+    if props.empty:
+        return props
+    clean = props.dropna(subset=["Player", "Side", "Odds"]).copy()
+    idx = clean.groupby(["Game","Market","Player","Side","Line"], dropna=False)["Odds"].idxmax()
+    return clean.loc[idx].reset_index(drop=True)
+
+def prop_value_board(props):
+    """
+    Market-consensus ranking, not a proprietary performance projection.
+    Compares each best price to a no-vig consensus derived from paired Over/Under prices.
+    """
+    if props.empty:
+        return pd.DataFrame()
+    best = prop_best_prices(props)
+    rows = []
+    group_cols = ["Game","Market","Player","Line"]
+    for keys, group in props.groupby(group_cols, dropna=False):
+        over = group[group.Side=="Over"]
+        under = group[group.Side=="Under"]
+        if over.empty or under.empty:
+            continue
+        over_consensus = over.Odds.apply(implied_probability).median()
+        under_consensus = under.Odds.apply(implied_probability).median()
+        total = over_consensus + under_consensus
+        if total <= 0:
+            continue
+        consensus = {"Over": over_consensus/total, "Under": under_consensus/total}
+        for side in ("Over","Under"):
+            choice = best[
+                (best.Game==keys[0]) & (best.Market==keys[1]) &
+                (best.Player==keys[2]) & (best.Line==keys[3]) &
+                (best.Side==side)
+            ]
+            if choice.empty:
+                continue
+            row = choice.iloc[0]
+            probability = consensus[side]
+            edge = (probability - implied_probability(row.Odds))*100
+            ev = expected_value(probability, row.Odds)
+            rows.append({
+                "Game": keys[0], "Market": keys[1], "Player": keys[2],
+                "Side": side, "Line": keys[3], "Odds": int(row.Odds),
+                "Book": row.Book, "BookLink": row.get("BookLink",""),
+                "ConsensusProb": probability, "Edge": edge, "EV": ev,
+                "Grade": grade(edge), "Score": int(clamp(round(50+edge*6),1,99)),
+                "LastUpdate": row.LastUpdate,
+            })
+    if not rows:
+        return pd.DataFrame()
+    return pd.DataFrame(rows).sort_values(["Edge","EV"], ascending=False)

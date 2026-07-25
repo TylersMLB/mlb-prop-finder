@@ -108,10 +108,14 @@ def sportsbook_odds(api_key, region):
             "markets": "h2h,spreads,totals", "oddsFormat": "american",
             "dateFormat": "iso",
         },
-        timeout=20,
+        timeout=25,
     )
     response.raise_for_status()
-    return response.json(), response.headers.get("x-requests-remaining")
+    return response.json(), {
+        "remaining": response.headers.get("x-requests-remaining"),
+        "used": response.headers.get("x-requests-used"),
+        "last": response.headers.get("x-requests-last"),
+    }
 
 def flatten_odds(raw):
     rows = []
@@ -121,9 +125,80 @@ def flatten_odds(raw):
             for market in book.get("markets", []):
                 for outcome in market.get("outcomes", []):
                     rows.append({
-                        "Game": game, "Book": book.get("title", ""),
+                        "EventID": event.get("id"), "Game": game,
+                        "CommenceTime": event.get("commence_time"),
+                        "BookKey": book.get("key", ""), "Book": book.get("title", ""),
+                        "BookLink": book.get("link", ""),
                         "Market": market.get("key", ""), "Selection": outcome.get("name", ""),
+                        "Description": outcome.get("description", ""),
                         "Line": outcome.get("point"), "Odds": outcome.get("price"),
+                        "LastUpdate": market.get("last_update", book.get("last_update", "")),
+                    })
+    return pd.DataFrame(rows)
+
+MLB_PROP_MARKETS = {
+    "Pitcher Strikeouts": "pitcher_strikeouts",
+    "Pitcher Outs": "pitcher_outs",
+    "Pitcher Hits Allowed": "pitcher_hits_allowed",
+    "Pitcher Walks": "pitcher_walks",
+    "Pitcher Earned Runs": "pitcher_earned_runs",
+    "Pitcher Win": "pitcher_record_a_win",
+    "Batter Total Bases": "batter_total_bases",
+    "Batter Hits": "batter_hits",
+    "Batter Home Runs": "batter_home_runs",
+    "Batter RBIs": "batter_rbis",
+    "Batter Runs": "batter_runs_scored",
+    "Hits + Runs + RBIs": "batter_hits_runs_rbis",
+    "Batter Walks": "batter_walks",
+    "Batter Strikeouts": "batter_strikeouts",
+    "Batter Singles": "batter_singles",
+    "Batter Doubles": "batter_doubles",
+    "Batter Triples": "batter_triples",
+    "Stolen Bases": "batter_stolen_bases",
+}
+
+@st.cache_data(ttl=180, show_spinner=False)
+def event_prop_odds(api_key, event_id, region, market_keys):
+    if not event_id or not market_keys:
+        return {}, {}
+    response = requests.get(
+        f"https://api.the-odds-api.com/v4/sports/baseball_mlb/events/{event_id}/odds",
+        params={
+            "apiKey": api_key,
+            "regions": region,
+            "markets": ",".join(market_keys),
+            "oddsFormat": "american",
+            "dateFormat": "iso",
+        },
+        timeout=35,
+    )
+    response.raise_for_status()
+    return response.json(), {
+        "remaining": response.headers.get("x-requests-remaining"),
+        "used": response.headers.get("x-requests-used"),
+        "last": response.headers.get("x-requests-last"),
+    }
+
+def flatten_props(events):
+    rows = []
+    for event in events:
+        if not event:
+            continue
+        game = f"{event.get('away_team')} @ {event.get('home_team')}"
+        for book in event.get("bookmakers", []):
+            for market in book.get("markets", []):
+                for outcome in market.get("outcomes", []):
+                    rows.append({
+                        "EventID": event.get("id"), "Game": game,
+                        "CommenceTime": event.get("commence_time"),
+                        "BookKey": book.get("key", ""), "Book": book.get("title", ""),
+                        "BookLink": book.get("link", ""),
+                        "Market": market.get("key", ""),
+                        "Player": outcome.get("description", ""),
+                        "Side": outcome.get("name", ""),
+                        "Line": outcome.get("point"),
+                        "Odds": outcome.get("price"),
+                        "LastUpdate": market.get("last_update", book.get("last_update", "")),
                     })
     return pd.DataFrame(rows)
 

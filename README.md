@@ -1,19 +1,22 @@
-# Diamond Edge MLB v5
+# Diamond Edge MLB v6
 
-A modular MLB betting-research dashboard.
+Version 6 fixes the missing-player-props problem by using The Odds API's event-level odds endpoint.
 
-## Connected
-- MLB schedule, standings, probable pitchers, and pitcher season stats
-- Open-Meteo game-time weather
-- The Odds API moneylines, spreads, and totals
-- Fair odds, edge, expected value, projected totals
-- Session bet tracker with CSV export
+## New features
+- Loads MLB player props one game at a time
+- Supports pitcher strikeouts, outs, hits allowed, walks, earned runs, and win props
+- Supports batter total bases, hits, home runs, RBIs, runs, H+R+RBI, walks, strikeouts, singles, doubles, triples, and stolen bases
+- Shows every sportsbook price
+- Shows the best price for each exact player, side, and line
+- Ranks line-shopping value using a no-vig sportsbook consensus
+- Displays estimated API-credit usage before loading
+- Provides CSV downloads
 
-## Honest limitations
-Confirmed lineups, injuries, umpire assignments, advanced Statcast splits, and live player props require more data connections. The app labels these instead of generating fake information.
+## Important
+The Odds API charges event-level requests by markets × regions. Start with 3–5 games and your favorite markets to conserve credits.
 
-## Upload to GitHub
-Replace the prior project with all six files:
+## Upload
+Replace all six files:
 - app.py
 - constants.py
 - data_sources.py
