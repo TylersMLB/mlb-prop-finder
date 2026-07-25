@@ -1,45 +1,27 @@
-# Diamond Edge MLB v4
+# Diamond Edge MLB v5
 
-Version 4 reorganizes the app into a modern sports analytics layout.
+A modular MLB betting-research dashboard.
 
-## Pages
+## Connected
+- MLB schedule, standings, probable pitchers, and pitcher season stats
+- Open-Meteo game-time weather
+- The Odds API moneylines, spreads, and totals
+- Fair odds, edge, expected value, projected totals
+- Session bet tracker with CSV export
 
-- Dashboard
-- Today's Games
-- Player Props
-- Best Bets
-- Analytics
-- Bet Tracker
-- Settings
+## Honest limitations
+Confirmed lineups, injuries, umpire assignments, advanced Statcast splits, and live player props require more data connections. The app labels these instead of generating fake information.
 
-## Features
-
-- Light background
-- Daily MLB slate
-- Probable pitchers
-- Team win percentage and run differential
-- Pitcher ERA, WHIP, and strikeout rate
-- Model win probabilities
-- Fair odds
-- Live sportsbook comparison
-- Expected value and model edge
-- Bet tracker with ROI
-- Mobile-friendly navigation
-
-## Install
-
-Replace the existing files in your GitHub repository with:
-
+## Upload to GitHub
+Replace the prior project with all six files:
 - app.py
+- constants.py
+- data_sources.py
+- model.py
 - requirements.txt
 - README.md
 
-Commit the changes. Streamlit will redeploy automatically.
-
-## Live odds
-
-Add this in Streamlit Secrets:
-
+## Streamlit secret
 ```toml
 ODDS_API_KEY = "your_key_here"
 ```
