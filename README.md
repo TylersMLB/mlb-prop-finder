@@ -1,55 +1,45 @@
-# MLB Betting Dashboard
+# Diamond Edge MLB — Version 2
 
-A Streamlit dashboard for:
+This upgraded Streamlit app includes:
 
-- MLB moneylines
-- Run lines
-- Game totals
-- Player props
-- Expected value
-- Confidence grades
-- Best-bets filtering
-- Live sportsbook lines through The Odds API
+- Polished dark dashboard
+- Daily MLB schedule and probable starters
+- Top-rated bet cards
+- Best sportsbook price comparison
+- Moneylines, run lines, and totals
+- Player-prop center
+- EV calculator
+- Bankroll unit calculator
+- Downloadable betting tracker
+- Mobile-friendly layout
 
-## Fastest setup
+## Replace your current app
 
-1. Upload every file in this folder to a new GitHub repository.
-2. Go to Streamlit Community Cloud.
-3. Click **Create app**.
-4. Select your GitHub repository.
-5. Set the main file path to:
+Upload these files to the root of your existing GitHub repository:
 
-```text
-app.py
-```
+- `app.py`
+- `requirements.txt`
 
-6. Deploy.
+Choose **Replace** when GitHub warns that the files already exist, then commit the changes.
 
-The app works immediately in demo mode.
+Streamlit should automatically redeploy.
 
-## Live odds
+## Live odds setup
 
-Create an account with The Odds API and get an API key.
+Create a key with The Odds API, then add it in Streamlit:
 
-In the app, paste the key into the sidebar.
-
-For a more secure deployment, add this to Streamlit Secrets:
+1. Open the app dashboard in Streamlit.
+2. Open **Manage app**.
+3. Select **Settings**.
+4. Open **Secrets**.
+5. Add:
 
 ```toml
 ODDS_API_KEY = "your_key_here"
 ```
 
-Then change the app later to read the secret automatically, or set it as an environment variable.
+6. Save and reboot.
 
-## Important limitation
+## Honest limitations
 
-Live player props often require a paid data plan. This version includes a working props interface and example model output, but not a paid props feed.
-
-## Run it on your computer
-
-Open a terminal inside the project folder and run:
-
-```bash
-pip install -r requirements.txt
-streamlit run app.py
-```
+The app includes a polished prop interface and demo model cards. A real predictive model, injuries, umpire data, weather adjustments, public betting percentages, and live player-prop feeds require additional data sources and/or paid API access.

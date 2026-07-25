@@ -1,363 +1,382 @@
 
 import os
-import math
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import requests
 import streamlit as st
 
 st.set_page_config(
-    page_title="MLB Betting Dashboard",
+    page_title="Diamond Edge MLB",
     page_icon="⚾",
     layout="wide",
+    initial_sidebar_state="expanded",
 )
 
-# -----------------------------
-# Styling
-# -----------------------------
-st.markdown(
-    """
-    <style>
-    .block-container {padding-top: 1.2rem; padding-bottom: 2rem;}
-    .metric-card {
-        border: 1px solid rgba(128,128,128,.25);
-        border-radius: 14px;
-        padding: 14px 16px;
-        background: rgba(255,255,255,.03);
-    }
-    .small-note {font-size: .85rem; opacity: .75;}
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+# -------------------- Theme --------------------
+st.markdown("""
+<style>
+:root {
+  --bg:#07111f; --panel:#0d1b2b; --panel2:#10243a;
+  --line:#1e3852; --text:#edf5ff; --muted:#8ea6bd;
+  --green:#22c55e; --yellow:#f59e0b; --red:#ef4444; --blue:#38bdf8;
+}
+.stApp {background:linear-gradient(180deg,#06101d 0%,#091728 100%); color:var(--text);}
+.block-container {padding-top:1rem; padding-bottom:3rem; max-width:1500px;}
+[data-testid="stSidebar"] {background:#081422; border-right:1px solid var(--line);}
+div[data-testid="stMetric"] {
+  background:linear-gradient(145deg,#0d1b2b,#10243a);
+  border:1px solid var(--line); border-radius:16px; padding:14px;
+}
+.bet-card {
+  background:linear-gradient(145deg,#0d1b2b,#10243a);
+  border:1px solid var(--line); border-radius:18px;
+  padding:18px; margin-bottom:12px; min-height:205px;
+}
+.grade-a {border-left:5px solid var(--green);}
+.grade-b {border-left:5px solid #84cc16;}
+.grade-c {border-left:5px solid var(--yellow);}
+.grade-pass {border-left:5px solid var(--red);}
+.badge {display:inline-block; padding:4px 9px; border-radius:999px; font-size:.75rem; font-weight:800;}
+.green {background:rgba(34,197,94,.16);color:#7df3a6;border:1px solid rgba(34,197,94,.35);}
+.yellow {background:rgba(245,158,11,.16);color:#ffd177;border:1px solid rgba(245,158,11,.35);}
+.red {background:rgba(239,68,68,.16);color:#ff9595;border:1px solid rgba(239,68,68,.35);}
+.blue {background:rgba(56,189,248,.16);color:#8edcff;border:1px solid rgba(56,189,248,.35);}
+.muted {color:var(--muted); font-size:.88rem;}
+.big-pick {font-size:1.18rem;font-weight:850;margin:.5rem 0;}
+.section-title {font-size:1.35rem;font-weight:850;margin-top:.4rem;}
+hr {border-color:var(--line);}
+.stTabs [data-baseweb="tab-list"] {gap:8px;}
+.stTabs [data-baseweb="tab"] {background:#0d1b2b;border-radius:10px;padding:8px 14px;}
+</style>
+""", unsafe_allow_html=True)
 
-# -----------------------------
-# Helpers
-# -----------------------------
-def american_to_decimal(odds: float) -> float:
-    if odds > 0:
-        return 1 + odds / 100
-    return 1 + 100 / abs(odds)
+CENTRAL = ZoneInfo("America/Chicago")
 
-def implied_probability(odds: float) -> float:
-    if odds > 0:
-        return 100 / (odds + 100)
-    return abs(odds) / (abs(odds) + 100)
+# -------------------- Math --------------------
+def implied_prob(odds):
+    odds = float(odds)
+    return 100 / (odds + 100) if odds > 0 else abs(odds) / (abs(odds) + 100)
 
-def expected_value_per_100(model_prob: float, odds: float) -> float:
-    dec = american_to_decimal(odds)
-    return 100 * ((model_prob * (dec - 1)) - (1 - model_prob))
+def decimal_odds(odds):
+    return 1 + odds / 100 if odds > 0 else 1 + 100 / abs(odds)
 
-def edge_pct(model_prob: float, odds: float) -> float:
-    return (model_prob - implied_probability(odds)) * 100
+def ev_per_100(prob, odds):
+    d = decimal_odds(float(odds))
+    return 100 * (prob * (d - 1) - (1 - prob))
 
-def confidence_label(edge: float) -> str:
-    if edge >= 8:
-        return "A"
-    if edge >= 5:
-        return "B"
-    if edge >= 2:
-        return "C"
-    return "Pass"
+def edge(prob, odds):
+    return (prob - implied_prob(odds)) * 100
 
-def freshness(ts: str) -> str:
+def grade_from_edge(x):
+    if x >= 7: return "A"
+    if x >= 4: return "B"
+    if x >= 1.5: return "C"
+    return "PASS"
+
+def color_from_grade(g):
+    return "green" if g in ("A","B") else "yellow" if g == "C" else "red"
+
+def css_grade(g):
+    return "grade-a" if g == "A" else "grade-b" if g == "B" else "grade-c" if g == "C" else "grade-pass"
+
+def format_start(iso):
     try:
-        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-        mins = int((datetime.now(timezone.utc) - dt).total_seconds() // 60)
-        return f"{mins} min ago"
+        return datetime.fromisoformat(iso.replace("Z","+00:00")).astimezone(CENTRAL).strftime("%a %-I:%M %p CT")
     except Exception:
-        return "Unknown"
+        return iso
 
+# -------------------- Data --------------------
 @st.cache_data(ttl=300)
-def fetch_odds(api_key: str, regions: str, markets: str) -> list:
+def get_schedule(date_str):
+    url = "https://statsapi.mlb.com/api/v1/schedule"
+    params = {"sportId":1, "date":date_str, "hydrate":"probablePitcher"}
+    r = requests.get(url, params=params, timeout=15)
+    r.raise_for_status()
+    data = r.json()
+    rows = []
+    for day in data.get("dates", []):
+        for game in day.get("games", []):
+            teams = game.get("teams", {})
+            away = teams.get("away", {}).get("team", {}).get("name", "")
+            home = teams.get("home", {}).get("team", {}).get("name", "")
+            away_p = game.get("teams", {}).get("away", {}).get("probablePitcher", {}).get("fullName", "TBD")
+            home_p = game.get("teams", {}).get("home", {}).get("probablePitcher", {}).get("fullName", "TBD")
+            rows.append({
+                "Game": f"{away} @ {home}",
+                "Away": away, "Home": home,
+                "Start": format_start(game.get("gameDate","")),
+                "Status": game.get("status", {}).get("detailedState",""),
+                "Away Starter": away_p, "Home Starter": home_p,
+            })
+    return pd.DataFrame(rows)
+
+@st.cache_data(ttl=180)
+def get_odds(api_key, regions="us", markets="h2h,spreads,totals"):
     url = "https://api.the-odds-api.com/v4/sports/baseball_mlb/odds/"
     params = {
-        "apiKey": api_key,
-        "regions": regions,
-        "markets": markets,
-        "oddsFormat": "american",
-        "dateFormat": "iso",
+        "apiKey":api_key, "regions":regions, "markets":markets,
+        "oddsFormat":"american", "dateFormat":"iso", "includeLinks":"true"
     }
     r = requests.get(url, params=params, timeout=20)
+    remaining = r.headers.get("x-requests-remaining")
+    used = r.headers.get("x-requests-used")
     r.raise_for_status()
-    return r.json()
+    return r.json(), remaining, used
 
-def parse_game_markets(raw_games: list) -> pd.DataFrame:
+def flatten_odds(games):
     rows = []
-    for game in raw_games:
-        away = game.get("away_team", "")
-        home = game.get("home_team", "")
-        start = game.get("commence_time", "")
-        for book in game.get("bookmakers", []):
-            book_name = book.get("title", "")
-            updated = book.get("last_update", "")
-            for market in book.get("markets", []):
-                key = market.get("key", "")
-                for outcome in market.get("outcomes", []):
+    for g in games:
+        matchup = f"{g.get('away_team')} @ {g.get('home_team')}"
+        for b in g.get("bookmakers", []):
+            for m in b.get("markets", []):
+                for o in m.get("outcomes", []):
                     rows.append({
-                        "Game": f"{away} @ {home}",
-                        "Start": start,
-                        "Sportsbook": book_name,
-                        "Market": key,
-                        "Selection": outcome.get("name", ""),
-                        "Point": outcome.get("point"),
-                        "Odds": outcome.get("price"),
-                        "Updated": updated,
+                        "Game":matchup,
+                        "Start":format_start(g.get("commence_time","")),
+                        "Book":b.get("title",""),
+                        "Market":m.get("key",""),
+                        "Selection":o.get("name",""),
+                        "Line":o.get("point"),
+                        "Odds":o.get("price"),
+                        "Updated":b.get("last_update",""),
                     })
     return pd.DataFrame(rows)
 
-def demo_board() -> pd.DataFrame:
+def best_prices(df):
+    if df.empty:
+        return df
+    x = df.copy()
+    x["LineKey"] = x["Line"].fillna(0)
+    idx = x.groupby(["Game","Market","Selection","LineKey"])["Odds"].idxmax()
+    return x.loc[idx].sort_values(["Game","Market","Selection"]).reset_index(drop=True)
+
+def demo_bets():
     return pd.DataFrame([
-        ["HOU @ TEX", "Moneyline", "HOU Astros", None, -118, 0.565, "Demo Model", "Starting pitching edge"],
-        ["LAD @ SF", "Run Line", "LAD Dodgers", -1.5, 124, 0.475, "Demo Model", "Bullpen + offense edge"],
-        ["NYY @ BOS", "Total", "Over", 8.5, -105, 0.545, "Demo Model", "Park + contact profile"],
-        ["SEA @ MIN", "Pitcher Strikeouts", "SEA Starter Over", 6.5, 110, 0.505, "Demo Model", "Opponent strikeout rate"],
-        ["ATL @ MIA", "Total Bases", "ATL Hitter Over", 1.5, 135, 0.455, "Demo Model", "Platoon + hard-hit matchup"],
-        ["CHC @ STL", "Home Run", "CHC Hitter", 0.5, 390, 0.235, "Demo Model", "Fly-ball + barrel matchup"],
-    ], columns=[
-        "Game", "Market", "Selection", "Line", "Odds", "Model Probability", "Source", "Reason"
-    ])
+        ["Houston Astros @ Texas Rangers","Moneyline","Houston Astros",None,-118,.565,"Starting pitcher + bullpen"],
+        ["Los Angeles Dodgers @ San Francisco Giants","Run Line","Los Angeles Dodgers",-1.5,124,.475,"Offense depth + late innings"],
+        ["New York Yankees @ Boston Red Sox","Total","Over",8.5,-105,.545,"Park + contact matchup"],
+        ["Seattle Mariners @ Minnesota Twins","Pitcher Ks","Starter Over",6.5,110,.505,"Opponent strikeout profile"],
+        ["Atlanta Braves @ Miami Marlins","Total Bases","Hitter Over",1.5,135,.455,"Platoon + hard-hit profile"],
+        ["Chicago Cubs @ St. Louis Cardinals","Home Run","Hitter Yes",None,390,.235,"Barrel + fly-ball matchup"],
+    ], columns=["Game","Market","Pick","Line","Odds","ModelProb","Reason"])
 
-# -----------------------------
-# Header
-# -----------------------------
-st.title("⚾ MLB Betting Dashboard")
-st.caption(
-    "Moneylines, run lines, totals, player props, expected value, confidence grades, "
-    "and a clean best-bets board."
-)
+def build_demo_rankings():
+    d = demo_bets()
+    d["Edge"] = d.apply(lambda r: edge(r.ModelProb,r.Odds),axis=1)
+    d["EV"] = d.apply(lambda r: ev_per_100(r.ModelProb,r.Odds),axis=1)
+    d["Grade"] = d.Edge.apply(grade_from_edge)
+    d["Score"] = (50 + d.Edge*5).clip(1,99).round().astype(int)
+    return d.sort_values(["Grade","EV"],ascending=[True,False])
 
+# -------------------- Sidebar --------------------
 with st.sidebar:
-    st.header("Setup")
+    st.markdown("## ⚾ Diamond Edge")
+    st.caption("MLB analysis dashboard")
+    selected_date = st.date_input("Slate date", datetime.now(CENTRAL).date())
     api_key = st.text_input(
         "The Odds API key",
-        value=os.getenv("ODDS_API_KEY", ""),
+        value=st.secrets.get("ODDS_API_KEY", os.getenv("ODDS_API_KEY","")),
         type="password",
-        help="Optional. Leave blank to use demo mode.",
+        help="Needed for real sportsbook odds."
     )
-    region = st.selectbox("Sportsbook region", ["us", "us2", "eu", "uk", "au"], index=0)
-    live_markets = st.multiselect(
-        "Live markets",
-        ["h2h", "spreads", "totals"],
-        default=["h2h", "spreads", "totals"],
-    )
+    region = st.selectbox("Odds region", ["us","us2","eu","uk","au"])
+    min_edge_filter = st.slider("Minimum model edge",0.0,12.0,1.5,.5)
+    min_score = st.slider("Minimum score",1,99,55)
     st.divider()
-    min_edge = st.slider("Minimum edge", 0.0, 15.0, 2.0, 0.5)
-    min_ev = st.slider("Minimum EV per $100", -20.0, 30.0, 0.0, 1.0)
-    books = st.multiselect(
-        "Sportsbooks",
-        ["All"],
-        default=["All"],
-        disabled=True,
-        help="The list becomes active after live odds load.",
-    )
-    st.divider()
-    st.caption("This app is an analysis tool, not a guarantee of winning.")
+    bankroll = st.number_input("Bankroll",min_value=0.0,value=500.0,step=25.0)
+    unit_pct = st.slider("Unit size (% of bankroll)",.25,5.0,1.0,.25)
+    st.metric("1 Unit",f"${bankroll*unit_pct/100:,.2f}")
+    st.caption("Only bet money you can afford to lose.")
 
-# -----------------------------
-# Data loading
-# -----------------------------
-live_df = pd.DataFrame()
-load_error = None
+# -------------------- Load --------------------
+schedule_error = None
+try:
+    schedule = get_schedule(str(selected_date))
+except Exception as e:
+    schedule = pd.DataFrame()
+    schedule_error = str(e)
 
-if api_key and live_markets:
+odds = pd.DataFrame()
+quota_remaining = quota_used = None
+odds_error = None
+if api_key:
     try:
-        raw = fetch_odds(api_key, region, ",".join(live_markets))
-        live_df = parse_game_markets(raw)
-    except Exception as exc:
-        load_error = str(exc)
+        raw, quota_remaining, quota_used = get_odds(api_key, region)
+        odds = flatten_odds(raw)
+    except Exception as e:
+        odds_error = str(e)
 
-if load_error:
-    st.error(f"Live odds could not load: {load_error}")
+# -------------------- Header --------------------
+left, right = st.columns([4,1])
+with left:
+    st.markdown("# Diamond Edge MLB")
+    st.caption("Best prices • matchup board • model grades • EV tools • betting tracker")
+with right:
+    mode = "LIVE ODDS" if not odds.empty else "DEMO MODE"
+    cls = "green" if not odds.empty else "yellow"
+    st.markdown(f'<div style="text-align:right"><span class="badge {cls}">{mode}</span></div>',unsafe_allow_html=True)
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs(
-    ["Best Bets", "Live Game Lines", "Player Props", "EV Calculator", "How It Works"]
-)
+tabs = st.tabs(["🏆 Top Bets","⚾ Today’s Games","💵 Best Odds","🎯 Player Props","🧮 EV Lab","📒 Bet Tracker","ℹ️ Setup"])
 
-# -----------------------------
-# Best Bets
-# -----------------------------
-with tab1:
-    st.subheader("Best Bets Board")
+# -------------------- TOP BETS --------------------
+with tabs[0]:
+    rankings = build_demo_rankings()
+    rankings = rankings[(rankings.Edge >= min_edge_filter) & (rankings.Score >= min_score)]
+    c1,c2,c3,c4 = st.columns(4)
+    c1.metric("Games Today",len(schedule))
+    c2.metric("Qualifying Plays",len(rankings))
+    c3.metric("Best Score",f"{rankings.Score.max()}/99" if len(rankings) else "—")
+    c4.metric("Live Books",odds.Book.nunique() if not odds.empty else 0)
 
-    board = demo_board().copy()
-    board["Implied Probability"] = board["Odds"].apply(implied_probability)
-    board["Edge %"] = board.apply(
-        lambda r: edge_pct(r["Model Probability"], r["Odds"]), axis=1
-    )
-    board["EV / $100"] = board.apply(
-        lambda r: expected_value_per_100(r["Model Probability"], r["Odds"]), axis=1
-    )
-    board["Grade"] = board["Edge %"].apply(confidence_label)
+    st.markdown('<div class="section-title">Top Rated Plays</div>',unsafe_allow_html=True)
+    st.caption("Demo model grades are clearly marked until a full projection-data connection is added.")
 
-    filtered = board[
-        (board["Edge %"] >= min_edge) &
-        (board["EV / $100"] >= min_ev)
-    ].copy()
-
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Qualifying Plays", len(filtered))
-    c2.metric("Best Edge", f'{filtered["Edge %"].max():.1f}%' if len(filtered) else "—")
-    c3.metric("Best EV", f'${filtered["EV / $100"].max():.2f}' if len(filtered) else "—")
-    c4.metric("A/B Grades", int(filtered["Grade"].isin(["A", "B"]).sum()) if len(filtered) else 0)
-
-    display = filtered.copy()
-    if len(display):
-        display["Model Probability"] = (display["Model Probability"] * 100).round(1).astype(str) + "%"
-        display["Implied Probability"] = (display["Implied Probability"] * 100).round(1).astype(str) + "%"
-        display["Edge %"] = display["Edge %"].round(1)
-        display["EV / $100"] = display["EV / $100"].round(2)
-
-    st.dataframe(
-        display[
-            ["Grade", "Game", "Market", "Selection", "Line", "Odds",
-             "Model Probability", "Implied Probability", "Edge %", "EV / $100", "Reason"]
-        ],
-        use_container_width=True,
-        hide_index=True,
-    )
-
-    st.info(
-        "The best-bets board currently uses demo model probabilities so the site works immediately. "
-        "Live sportsbook lines can be enabled with an API key. A real projection model can later replace "
-        "the demo probabilities."
-    )
-
-# -----------------------------
-# Live lines
-# -----------------------------
-with tab2:
-    st.subheader("Live Moneylines, Run Lines, and Totals")
-
-    if live_df.empty:
-        st.warning("Enter an Odds API key in the sidebar to load live sportsbook lines.")
-        st.dataframe(
-            pd.DataFrame([
-                ["Example Sportsbook", "HOU @ TEX", "h2h", "Houston Astros", None, -118],
-                ["Example Sportsbook", "LAD @ SF", "spreads", "Los Angeles Dodgers", -1.5, 124],
-                ["Example Sportsbook", "NYY @ BOS", "totals", "Over", 8.5, -105],
-            ], columns=["Sportsbook", "Game", "Market", "Selection", "Point", "Odds"]),
-            use_container_width=True,
-            hide_index=True,
-        )
+    if rankings.empty:
+        st.warning("No plays meet your filters.")
     else:
-        live_df["Freshness"] = live_df["Updated"].apply(freshness)
-        market_names = {
-            "h2h": "Moneyline",
-            "spreads": "Run Line",
-            "totals": "Total",
-        }
-        live_df["Market"] = live_df["Market"].map(market_names).fillna(live_df["Market"])
+        cols = st.columns(3)
+        for i,(_,r) in enumerate(rankings.head(9).iterrows()):
+            with cols[i%3]:
+                line_text = "" if pd.isna(r.Line) else f" {r.Line:g}"
+                badge = color_from_grade(r.Grade)
+                st.markdown(f"""
+                <div class="bet-card {css_grade(r.Grade)}">
+                  <span class="badge {badge}">GRADE {r.Grade}</span>
+                  <span class="badge blue">{r.Score}/99</span>
+                  <div class="muted" style="margin-top:10px">{r.Game}</div>
+                  <div class="big-pick">{r.Pick}{line_text} ({int(r.Odds):+d})</div>
+                  <div><b>{r.Market}</b></div>
+                  <div style="margin-top:10px">Edge: <b>{r.Edge:.1f}%</b> &nbsp; EV: <b>${r.EV:.2f}/$100</b></div>
+                  <div class="muted" style="margin-top:10px">{r.Reason}</div>
+                </div>
+                """,unsafe_allow_html=True)
 
-        book_options = sorted(live_df["Sportsbook"].dropna().unique().tolist())
-        selected_books = st.multiselect("Filter sportsbooks", book_options, default=book_options)
-        game_options = sorted(live_df["Game"].dropna().unique().tolist())
-        selected_games = st.multiselect("Filter games", game_options, default=game_options)
-
-        view = live_df[
-            live_df["Sportsbook"].isin(selected_books) &
-            live_df["Game"].isin(selected_games)
-        ].copy()
-
-        st.dataframe(
-            view[["Game", "Sportsbook", "Market", "Selection", "Point", "Odds", "Freshness"]],
-            use_container_width=True,
-            hide_index=True,
-        )
-
-# -----------------------------
-# Player Props
-# -----------------------------
-with tab3:
-    st.subheader("Player Props")
-    st.write(
-        "This section is ready for strikeouts, total bases, home runs, hits, RBIs, and runs."
-    )
-
-    props = pd.DataFrame([
-        ["Pitcher Strikeouts", "Example Pitcher", "Over 6.5", -110, 54.0, 4.0, 3.09],
-        ["Total Bases", "Example Hitter", "Over 1.5", 125, 47.0, 2.6, 5.75],
-        ["Home Run", "Example Hitter", "Yes", 390, 23.5, 3.1, 15.15],
-        ["Hits", "Example Hitter", "Over 0.5", -165, 65.0, 2.7, 4.24],
-    ], columns=[
-        "Market", "Player", "Pick", "Odds", "Model Probability %", "Edge %", "EV / $100"
-    ])
-    st.dataframe(props, use_container_width=True, hide_index=True)
-
-    st.caption(
-        "Many live player-prop feeds require a paid odds-data plan. The code is structured so "
-        "those feeds can be added without redesigning the app."
-    )
-
-# -----------------------------
-# EV Calculator
-# -----------------------------
-with tab4:
-    st.subheader("Expected Value Calculator")
-    col1, col2 = st.columns(2)
-    with col1:
-        calc_odds = st.number_input("American odds", value=-110, step=5)
-    with col2:
-        calc_prob_pct = st.number_input(
-            "Your estimated win probability (%)",
-            min_value=1.0,
-            max_value=99.0,
-            value=55.0,
-            step=0.5,
-        )
-
-    calc_prob = calc_prob_pct / 100
-    imp = implied_probability(calc_odds)
-    ev = expected_value_per_100(calc_prob, calc_odds)
-    edge = edge_pct(calc_prob, calc_odds)
-
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Implied Probability", f"{imp * 100:.1f}%")
-    c2.metric("Your Edge", f"{edge:.1f}%")
-    c3.metric("EV per $100", f"${ev:.2f}")
-
-    if ev > 0:
-        st.success("Positive expected value based on your probability estimate.")
+# -------------------- GAMES --------------------
+with tabs[1]:
+    st.markdown('<div class="section-title">MLB Slate</div>',unsafe_allow_html=True)
+    if schedule_error:
+        st.error(f"Schedule could not load: {schedule_error}")
+    elif schedule.empty:
+        st.info("No MLB games found for this date.")
     else:
-        st.error("Negative expected value based on your probability estimate.")
+        for _,g in schedule.iterrows():
+            with st.expander(f"{g.Game}  •  {g.Start}  •  {g.Status}"):
+                c1,c2,c3 = st.columns([2,1,2])
+                c1.markdown(f"**{g.Away}**  \nStarter: {g['Away Starter']}")
+                c2.markdown("<div style='text-align:center;font-size:1.4rem;font-weight:900'>@</div>",unsafe_allow_html=True)
+                c3.markdown(f"**{g.Home}**  \nStarter: {g['Home Starter']}")
+                matching = odds[odds.Game.eq(g.Game)] if not odds.empty else pd.DataFrame()
+                if not matching.empty:
+                    st.dataframe(best_prices(matching)[["Market","Selection","Line","Odds","Book"]],use_container_width=True,hide_index=True)
+                else:
+                    st.caption("No connected sportsbook lines for this game.")
 
-# -----------------------------
-# Method
-# -----------------------------
-with tab5:
-    st.subheader("How the Engine Works")
-    st.markdown(
-        """
-        **1. Collect the line**  
-        The app reads the sportsbook's American odds.
+# -------------------- BEST ODDS --------------------
+with tabs[2]:
+    st.markdown('<div class="section-title">Best Available Prices</div>',unsafe_allow_html=True)
+    if odds_error:
+        st.error(f"Odds could not load: {odds_error}")
+    if odds.empty:
+        st.warning("Add your API key in the sidebar to compare real sportsbook prices.")
+    else:
+        b = best_prices(odds)
+        market_map = {"h2h":"Moneyline","spreads":"Run Line","totals":"Total"}
+        b["Market"] = b.Market.map(market_map).fillna(b.Market)
+        games = st.multiselect("Games",sorted(b.Game.unique()),default=sorted(b.Game.unique()))
+        books = st.multiselect("Sportsbooks",sorted(b.Book.unique()),default=sorted(b.Book.unique()))
+        view = b[b.Game.isin(games)&b.Book.isin(books)]
+        st.dataframe(view[["Game","Start","Market","Selection","Line","Odds","Book"]],use_container_width=True,hide_index=True)
+        if quota_remaining is not None:
+            st.caption(f"API requests remaining: {quota_remaining} • Used: {quota_used}")
 
-        **2. Convert odds to implied probability**  
-        This estimates the break-even win rate before removing sportsbook hold.
+# -------------------- PROPS --------------------
+with tabs[3]:
+    st.markdown('<div class="section-title">Player Prop Center</div>',unsafe_allow_html=True)
+    st.info("The interface is ready. Real player props require an API plan that includes MLB event markets.")
+    prop_tabs = st.tabs(["Strikeouts","Total Bases","Hits","Home Runs","RBIs","Walks"])
+    examples = {
+        "Strikeouts":["Pitcher Over 6.5","K matchup","Velocity","Pitch count"],
+        "Total Bases":["Hitter Over 1.5","Platoon split","Hard-hit rate","Park factor"],
+        "Hits":["Hitter Over 0.5","Contact rate","Pitch mix","Lineup spot"],
+        "Home Runs":["Hitter Yes","Barrel rate","Fly-ball rate","Weather"],
+        "RBIs":["Hitter Over 0.5","Lineup position","Team total","On-base traffic"],
+        "Walks":["Hitter Over 0.5","Chase rate","Pitcher BB%","Umpire zone"],
+    }
+    for tab,(name,vals) in zip(prop_tabs,examples.items()):
+        with tab:
+            st.dataframe(pd.DataFrame([{
+                "Player":"Example Player","Pick":vals[0],"Best Odds":"+110",
+                "Score":"68/99","Primary Edge":vals[1],"Secondary":vals[2],"Context":vals[3]
+            }]),use_container_width=True,hide_index=True)
 
-        **3. Compare against a model probability**  
-        The current downloadable version includes demo probabilities so the dashboard works immediately.
+# -------------------- EV --------------------
+with tabs[4]:
+    st.markdown('<div class="section-title">Expected Value Lab</div>',unsafe_allow_html=True)
+    a,b,c = st.columns(3)
+    user_odds = a.number_input("American odds",value=-110,step=5)
+    user_prob = b.number_input("Your win probability (%)",1.0,99.0,55.0,.5)
+    stake = c.number_input("Stake",1.0,10000.0,100.0,5.0)
+    p = user_prob/100
+    imp = implied_prob(user_odds)
+    ev100 = ev_per_100(p,user_odds)
+    evstake = ev100*stake/100
+    e = edge(p,user_odds)
+    m1,m2,m3,m4 = st.columns(4)
+    m1.metric("Break-even",f"{imp*100:.1f}%")
+    m2.metric("Model edge",f"{e:.1f}%")
+    m3.metric("EV per $100",f"${ev100:.2f}")
+    m4.metric("EV on stake",f"${evstake:.2f}")
+    st.success("Positive expected value." if evstake>0 else "This price is negative expected value based on your estimate.")
 
-        **4. Calculate edge and expected value**  
-        Edge is the model probability minus implied probability. EV estimates profit or loss per $100 risked over many similar bets.
+# -------------------- TRACKER --------------------
+with tabs[5]:
+    st.markdown('<div class="section-title">Bet Tracker</div>',unsafe_allow_html=True)
+    st.caption("Enter bets below, then download the tracker as a CSV. Persistent cloud storage can be added later.")
+    if "tracker" not in st.session_state:
+        st.session_state.tracker = pd.DataFrame(columns=["Date","Bet","Odds","Stake","Result","Profit"])
+    with st.form("bet_form",clear_on_submit=True):
+        c1,c2,c3 = st.columns(3)
+        bet_name = c1.text_input("Bet")
+        bet_odds = c2.number_input("Odds",value=-110,step=5)
+        bet_stake = c3.number_input("Stake",min_value=1.0,value=10.0,step=5.0)
+        c4,c5 = st.columns(2)
+        result = c4.selectbox("Result",["Pending","Win","Loss","Push"])
+        bet_date = c5.date_input("Date",selected_date)
+        add = st.form_submit_button("Add Bet")
+    if add and bet_name:
+        if result=="Win": profit = bet_stake*(decimal_odds(bet_odds)-1)
+        elif result=="Loss": profit = -bet_stake
+        else: profit = 0
+        new = pd.DataFrame([[str(bet_date),bet_name,bet_odds,bet_stake,result,round(profit,2)]],
+                           columns=st.session_state.tracker.columns)
+        st.session_state.tracker = pd.concat([st.session_state.tracker,new],ignore_index=True)
+    if not st.session_state.tracker.empty:
+        st.dataframe(st.session_state.tracker,use_container_width=True,hide_index=True)
+        st.metric("Tracked Profit",f"${st.session_state.tracker.Profit.sum():.2f}")
+        st.download_button("Download Tracker CSV",st.session_state.tracker.to_csv(index=False),
+                           "mlb_bet_tracker.csv","text/csv")
+    else:
+        st.info("No bets added yet.")
 
-        **5. Grade the play**  
-        Larger edges receive higher confidence grades, but no grade guarantees a win.
-        """
-    )
+# -------------------- SETUP --------------------
+with tabs[6]:
+    st.markdown('<div class="section-title">Connection Status</div>',unsafe_allow_html=True)
+    st.write("✅ MLB schedule connection" if not schedule.empty else "⚠️ MLB schedule unavailable")
+    st.write("✅ Live sportsbook odds" if not odds.empty else "⚠️ Add The Odds API key for live odds")
+    st.write("⚠️ Player-prop feed requires eligible API access")
+    st.write("⚠️ Weather, injuries, umpire data, and true projection models need additional data sources")
+    st.markdown("""
+    ### Add the API key securely
+    In Streamlit, open **Manage app → Settings → Secrets** and add:
 
-    st.subheader("Planned Model Inputs")
-    st.markdown(
-        """
-        - Starting pitcher skill, recent form, pitch count, handedness, and strikeout matchup
-        - Bullpen quality, availability, and recent workload
-        - Team hitting splits and projected batting order
-        - Park factors and weather
-        - Injuries and confirmed lineups
-        - Sportsbook consensus, best available price, and line movement
-        - Player-specific barrel rate, hard-hit rate, contact rate, and platoon splits
-        """
-    )
+    ```toml
+    ODDS_API_KEY = "your_key_here"
+    ```
+
+    Then save and reboot the app.
+    """)
 
 st.divider()
-st.caption("Built with Streamlit • Refresh live odds from the sidebar")
+st.caption("Diamond Edge is an analysis tool. Model scores are not guarantees. Verify lines before betting.")
