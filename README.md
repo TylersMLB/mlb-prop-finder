@@ -1,45 +1,40 @@
-# Diamond Edge MLB — Version 2
+# Diamond Edge MLB v3
 
-This upgraded Streamlit app includes:
+Version 3 adds a real data-driven MLB moneyline model and a light, easier-to-read design.
 
-- Polished dark dashboard
-- Daily MLB schedule and probable starters
-- Top-rated bet cards
-- Best sportsbook price comparison
-- Moneylines, run lines, and totals
-- Player-prop center
-- EV calculator
-- Bankroll unit calculator
-- Downloadable betting tracker
-- Mobile-friendly layout
+## New in this version
 
-## Replace your current app
+- Light background and dark text
+- Current MLB schedule
+- Current standings and run differential
+- Probable pitcher statistics
+- Model win probabilities
+- Model fair moneyline odds
+- Best sportsbook moneyline price
+- Edge and expected value
+- Green, yellow, and red bet grades
+- Game-by-game model explanations
 
-Upload these files to the root of your existing GitHub repository:
+## Install
+
+Replace the existing files in your GitHub repository with:
 
 - `app.py`
 - `requirements.txt`
+- `README.md`
 
-Choose **Replace** when GitHub warns that the files already exist, then commit the changes.
+Commit the changes. Streamlit should automatically redeploy.
 
-Streamlit should automatically redeploy.
+## Live odds
 
-## Live odds setup
-
-Create a key with The Odds API, then add it in Streamlit:
-
-1. Open the app dashboard in Streamlit.
-2. Open **Manage app**.
-3. Select **Settings**.
-4. Open **Secrets**.
-5. Add:
+In Streamlit Secrets, add:
 
 ```toml
 ODDS_API_KEY = "your_key_here"
 ```
 
-6. Save and reboot.
+Without the key, the model still produces game predictions and fair odds.
 
-## Honest limitations
+## Important
 
-The app includes a polished prop interface and demo model cards. A real predictive model, injuries, umpire data, weather adjustments, public betting percentages, and live player-prop feeds require additional data sources and/or paid API access.
+This version is data-driven but is not yet a trained machine-learning model. Weather, injuries, confirmed lineups, bullpen workload, umpire data, and player-prop projections are planned next.
